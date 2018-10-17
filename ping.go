@@ -48,8 +48,6 @@ import (
 	"math"
 	"math/rand"
 	"net"
-	"os"
-	"os/signal"
 	"sync"
 	"syscall"
 	"time"
@@ -93,9 +91,9 @@ func NewPinger(addr string) (*Pinger, error) {
 		id:       rand.Intn(0xffff),
 		network:  "udp",
 		ipv4:     ipv4,
-		Size:    timeSliceLength,
+		Size:     timeSliceLength,
 
-		done: make(chan bool),
+		Done: make(chan bool),
 	}, nil
 }
 
@@ -135,7 +133,7 @@ type Pinger struct {
 	Size int
 
 	// stop chan bool
-	done chan bool
+	Done chan bool
 
 	ipaddr *net.IPAddr
 	addr   string
@@ -290,19 +288,16 @@ func (p *Pinger) run() {
 
 	timeout := time.NewTicker(p.Timeout)
 	interval := time.NewTicker(p.Interval)
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt)
-	signal.Notify(c, syscall.SIGTERM)
+	// create a new done channel for this process
+	p.Done = make(chan bool)
 
 	for {
 		select {
-		case <-c:
-			close(p.done)
-		case <-p.done:
+		case <-p.Done:
 			wg.Wait()
 			return
 		case <-timeout.C:
-			close(p.done)
+			close(p.Done)
 			wg.Wait()
 			return
 		case <-interval.C:
@@ -317,7 +312,7 @@ func (p *Pinger) run() {
 			}
 		default:
 			if p.Count > 0 && p.PacketsRecv >= p.Count {
-				close(p.done)
+				close(p.Done)
 				wg.Wait()
 				return
 			}
@@ -382,7 +377,7 @@ func (p *Pinger) recvICMP(
 	defer wg.Done()
 	for {
 		select {
-		case <-p.done:
+		case <-p.Done:
 			return
 		default:
 			bytes := make([]byte, 512)
@@ -394,7 +389,7 @@ func (p *Pinger) recvICMP(
 						// Read timeout
 						continue
 					} else {
-						close(p.done)
+						close(p.Done)
 						return
 					}
 				}
@@ -510,7 +505,7 @@ func (p *Pinger) listen(netProto string, source string) *icmp.PacketConn {
 	conn, err := icmp.ListenPacket(netProto, source)
 	if err != nil {
 		fmt.Printf("Error listening for ICMP packets: %s\n", err.Error())
-		close(p.done)
+		close(p.Done)
 		return nil
 	}
 	return conn
